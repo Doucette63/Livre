@@ -1,4 +1,4 @@
-name: Goupil
+name: Doucette
 
 on:
   workflow_dispatch:
