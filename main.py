@@ -6,6 +6,7 @@ import requests
 import json
 import re
 import unicodedata
+import subprocess
 from urllib.parse import urlparse, parse_qs
 
 # ----------------------
@@ -87,6 +88,37 @@ def save_seen(seen_items):
     with open(SEEN_FILE, "w") as f:
         json.dump(pruned, f)
     return pruned
+
+_git_configured = False
+
+def commit_seen_file():
+    """Committe et pousse seen.json directement depuis Python, à chaque
+    cycle. Nécessaire car le workflow peut être coupé (cancel-in-progress)
+    à tout moment par le cron suivant, avant d'atteindre une éventuelle
+    étape de commit en fin de job — donc on ne peut pas attendre la fin."""
+    global _git_configured
+    try:
+        if not _git_configured:
+            subprocess.run(["git", "config", "--global", "user.name", "Vinted Bot"], check=False)
+            subprocess.run(["git", "config", "--global", "user.email", "vinted-bot@example.com"], check=False)
+            _git_configured = True
+
+        subprocess.run(["git", "add", SEEN_FILE], check=False, capture_output=True)
+        result = subprocess.run(
+            ["git", "commit", "-m", "Update seen.json [ci skip]"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            # Rien à committer, c'est le cas normal la plupart du temps
+            return
+
+        push = subprocess.run(["git", "push"], capture_output=True, text=True)
+        if push.returncode != 0:
+            logger.warning(f"⚠️ Échec du git push : {push.stderr.strip()}")
+        else:
+            logger.info("💾 seen.json committé et poussé")
+    except Exception as e:
+        logger.warning(f"Erreur lors du commit git : {e}")
 
 seen_items = load_seen()
 
@@ -350,6 +382,7 @@ def check_vinted():
             send_error_alert("Erreur Inconnue", e, url)
 
     seen_items = save_seen(seen_items)
+    commit_seen_file()
     logger.info("💾 Fichier seen.json mis à jour après ce scraping")
 
     if total_new_items == 0:
@@ -378,6 +411,7 @@ def bot_loop():
 
     logger.info("🏁 Fin du run")
     save_seen(seen_items)
+    commit_seen_file()
     send_status_message("✅ Run terminé !")
 
 # ----------------------
